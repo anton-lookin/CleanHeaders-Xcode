@@ -57,14 +57,17 @@
  *  Actual action to clean the header.
  */
 - (void)cleanHeaderAction {
-  if (![CHTRVSXcode textViewHasSelection]) {
-    [self formatRanges:@[
-      [NSValue valueWithRange:[CHTRVSXcode wholeRangeOfTextView]]
-    ] inDocument:[CHTRVSXcode sourceCodeDocument]];
-  } else {
-    [self formatRanges:[[CHTRVSXcode textView] selectedRanges]
-            inDocument:[CHTRVSXcode sourceCodeDocument]];
-  }
+	NSValue *range = [NSValue valueWithRange:[CHTRVSXcode wholeRangeOfTextView]];
+	[self formatRanges:@[range] inDocument:[CHTRVSXcode sourceCodeDocument]];
+	return;
+//  if (![CHTRVSXcode textViewHasSelection]) {
+//    [self formatRanges:@[
+//      [NSValue valueWithRange:[CHTRVSXcode wholeRangeOfTextView]]
+//    ] inDocument:[CHTRVSXcode sourceCodeDocument]];
+//  } else {
+//    [self formatRanges:[[CHTRVSXcode textView] selectedRanges]
+//            inDocument:[CHTRVSXcode sourceCodeDocument]];
+//  }
 }
 
 - (NSString *)formatSelection:(NSString *)content {
@@ -77,8 +80,7 @@
 
   // Convert the entire source into an array based on new lines.
   // Hence the imports have to be alteast in new line to work.
-  NSMutableArray *lines = [[NSMutableArray alloc]
-      initWithArray:[content componentsSeparatedByString:@"\n"]];
+  NSMutableArray *lines = [[NSMutableArray alloc] initWithArray:[content componentsSeparatedByString:@"\n"]];
 
   // Position of the first and last line of header, to be used for repalcement
   // of header content.
@@ -87,13 +89,11 @@
   BOOL __block endOfFileWithNewLine = YES;  // Indicates if the selection's last
   // line was a new line.
   NSMutableArray *headerRows = [[NSMutableArray alloc] init];
-
+	
   // Go through each of the line and identify any header elements.
   [lines enumerateObjectsUsingBlock:^(NSString *string, NSUInteger idx,
                                       BOOL *_Nonnull stop) {
-    NSString *cleansedLine =
-        [string stringByTrimmingCharactersInSet:
-                    [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSString *cleansedLine = [string stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 
     BOOL isLineHeader = [cleansedLine hasPrefix:traditionalImportPrefix] ||
                         [cleansedLine hasPrefix:traditionalIncludePrefix] ||
@@ -138,15 +138,63 @@
   // If both the indices are set it means that we have a header section in the
   // file and it needs replacing after sorting.
   if (lastIndex >= 0 && initalIndex >= 0) {
-    [headerRows sortUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
-    // Add a new line to make it look clean (if needed)
-    if (endOfFileWithNewLine) {
-      [headerRows addObject:@"\n"];
-    }
-    // replace it in the array of all lines.
-    [lines replaceObjectsInRange:NSMakeRange(initalIndex,
-                                             (lastIndex - initalIndex))
-            withObjectsFromArray:headerRows];
+	  [headerRows sortUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+	  NSArray *modules = [headerRows filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF BEGINSWITH %@ AND NOT SELF CONTAINS %@", @"@import", @"<"]];
+	  NSArray *frameworks = [headerRows filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF BEGINSWITH %@ AND NOT SELF CONTAINS %@ AND SELF CONTAINS %@", @"#import", @"NimbleCommerceSDK", @"<"]];
+	  NSArray *nimblecommerces = [headerRows filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF CONTAINS %@", @"NimbleCommerceSDK"]];
+	  NSArray *imports = [headerRows filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF BEGINSWITH %@ AND NOT SELF CONTAINS %@", @"#import", @"<"]];
+	  NSString *sourceFileName = [[CHTRVSXcode sourceCodeDocument].fileURL lastPathComponent];
+	  NSString *headerImportLine = nil;
+	  if ([sourceFileName containsString:@".m"]) {
+		  headerImportLine = [NSString stringWithFormat:@"#import \"%@\"", [sourceFileName stringByReplacingOccurrencesOfString:@".m" withString:@".h"]];
+		  if ([imports containsObject:headerImportLine]) {
+			  imports = [imports filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF != %@", headerImportLine]];
+		  } else {
+			  headerImportLine = nil;
+		  }
+	  }
+	  
+	  NSArray *includes = [headerRows filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF CONTAINS %@", @"include"]];
+	  NSArray *swifts = [headerRows filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF BEGINSWITH %@", @"import"]];
+	  
+	  headerRows = [NSMutableArray arrayWithArray:modules];
+	  if ([modules count]) {
+		  [headerRows addObject:@"\r"];
+	  }
+	  [headerRows addObjectsFromArray:frameworks];
+	  if ([frameworks count]) {
+		  [headerRows addObject:@"\r"];
+	  }
+	  [headerRows addObjectsFromArray:nimblecommerces];
+	  if ([nimblecommerces count]) {
+		  [headerRows addObject:@"\r"];
+	  }
+	  [headerRows addObjectsFromArray:imports];
+	  if ([imports count]) {
+		  [headerRows addObject:@"\r"];
+	  }
+	  [headerRows addObjectsFromArray:includes];
+	  if ([includes count]) {
+		  [headerRows addObject:@"\r"];
+	  }
+	  [headerRows addObjectsFromArray:swifts];
+	  if ([swifts count]) {
+		  [headerRows addObject:@"\r"];
+	  }
+	  
+	  if ([headerImportLine length]) {
+		  [headerRows addObject:headerImportLine];
+		  [headerRows addObject:@"\r"];
+	  }
+	  
+	  // Add a new line to make it look clean (if needed)
+	  if (endOfFileWithNewLine) {
+		  [headerRows addObject:@"\r"];
+	  }
+	  
+	  // replace it in the array of all lines.
+	  [lines replaceObjectsInRange:NSMakeRange(initalIndex, (lastIndex - initalIndex))
+			  withObjectsFromArray:headerRows];
   }
 
   return [lines componentsJoinedByString:@"\n"];
@@ -163,8 +211,7 @@
   DVTSourceTextStorage *textStorage = [document textStorage];
 
   NSRange range = [ranges.firstObject rangeValue];
-  NSString *formattedString =
-      [self formatSelection:[[textStorage string] substringWithRange:range]];
+  NSString *formattedString = [self formatSelection:[[textStorage string] substringWithRange:range]];
   [textStorage replaceCharactersInRange:range
                              withString:formattedString
                         withUndoManager:document.undoManager];
